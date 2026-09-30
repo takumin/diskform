@@ -1,0 +1,61 @@
+version: 1
+
+disk:
+  sys0:
+    match: {serial: S5GXNX0T123456, min_size: 900GiB}
+    table: gpt
+    partitions:
+    - {name: esp, size: 1GiB, type: esp}
+    - {name: crypt, size: 100%}
+  data0:
+    match: {serial: ZL2ABC01, min_size: 4TiB}
+    table: gpt
+    partitions:
+    - {name: data0, size: 100%}
+  data1:
+    match: {serial: ZL2ABC02, min_size: 4TiB}
+    table: gpt
+    partitions:
+    - {name: data1, size: 100%}
+
+luks:
+  cryptsys:
+    device: disk.sys0.crypt
+    keyfile: /run/keys/sys.key
+
+lvm:
+  vg0:
+    devices: [luks.cryptsys]
+    volumes:
+      root: {size: 64GiB}
+      swap: {size: 16GiB}
+      var: {size: 100%}
+
+filesystem:
+  efi:
+    device: disk.sys0.esp
+    format: vfat
+    mount: /boot/efi
+    mount_options: [umask=0077]
+  root:
+    device: lvm.vg0.root
+    format: ext4
+    mount: /
+  var:
+    device: lvm.vg0.var
+    format: xfs
+    mount: /var
+  data:
+    devices: [disk.data0.data0, disk.data1.data1]
+    format: btrfs
+    mount_options: ["compress=zstd:3"]
+    btrfs:
+      data_profile: raid1
+      metadata_profile: raid1
+    subvolumes:
+      srv: {path: "@srv", mount: /srv}
+      snapshots: {path: "@snapshots", mount: /srv/.snapshots}
+
+swap:
+  main:
+    device: lvm.vg0.swap

@@ -239,7 +239,8 @@ plan 層のテストの成功をもって、apply 層の挙動を保証したと
 
 - 最低サポート Rust バージョン（MSRV）：TBD
 - 宣言ファイルの形式：YAML または JSON（`docs/adr/0001-declaration-format.md`）
-- `examples/` と `tests/` のディレクトリ構成：TBD
+- `examples/` のディレクトリ構成：`examples/<例の名前>/diskform.yaml`
+- `tests/` のディレクトリ構成：TBD
 - フォーマット、lint、テストの実行コマンド：TBD
 - apply 層のテストの実行方法（必要な権限と環境）：TBD
 

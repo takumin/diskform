@@ -3,7 +3,7 @@ version: 1
 disk:
   sys0:
     match:
-      path: /dev/disk/by-id/nvme-Samsung_SSD_980_PRO_1TB_S5GXNX0T123456
+      path: /dev/disk/by-id/nvme-Samsung_SSD_980_PRO_1TB_*
       min_size: 900GiB
     table: gpt
     partitions:

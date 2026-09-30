@@ -2,18 +2,18 @@ version: 1
 
 disk:
   sys0:
-    match: {serial: S5GXNX0T123456, min_size: 900GiB}
+    match: {by_path: pci-0000:01:00.0-nvme-1, min_size: 900GiB}
     table: gpt
     partitions:
     - {name: esp, size: 1GiB, type: esp}
     - {name: crypt, size: 100%}
   data0:
-    match: {serial: ZL2ABC01, min_size: 4TiB}
+    match: {by_path: pci-0000:00:17.0-ata-1, min_size: 4TiB}
     table: gpt
     partitions:
     - {name: data0, size: 100%}
   data1:
-    match: {serial: ZL2ABC02, min_size: 4TiB}
+    match: {by_path: pci-0000:00:17.0-ata-2, min_size: 4TiB}
     table: gpt
     partitions:
     - {name: data1, size: 100%}

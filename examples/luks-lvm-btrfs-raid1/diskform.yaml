@@ -7,22 +7,22 @@ disk:
       min_size: 900GiB
     table: gpt
     partitions:
-    - {name: esp, size: 1GiB, type: esp}
-    - {name: crypt, size: 100%}
+    - {name: esp, size: 1GiB, type: esp, label: esp}
+    - {name: crypt, size: 100%, label: cryptsys}
   data0:
     match:
       path: /dev/disk/by-path/pci-0000:00:17.0-ata-1
       min_size: 4TiB
     table: gpt
     partitions:
-    - {name: data0, size: 100%}
+    - {name: data0, size: 100%, label: data0}
   data1:
     match:
       path: /dev/disk/by-path/pci-0000:00:17.0-ata-2
       min_size: 4TiB
     table: gpt
     partitions:
-    - {name: data1, size: 100%}
+    - {name: data1, size: 100%, label: data1}
 
 luks:
   cryptsys:
@@ -41,19 +41,23 @@ filesystem:
   efi:
     device: disk.sys0.esp
     format: vfat
+    label: EFI
     mount: /boot/efi
     mount_options: [umask=0077]
   root:
     device: lvm.vg0.root
     format: ext4
+    label: root
     mount: /
   var:
     device: lvm.vg0.var
     format: xfs
+    label: var
     mount: /var
   data:
     devices: [disk.data0.data0, disk.data1.data1]
     format: btrfs
+    label: data
     mount_options: ["compress=zstd:3"]
     btrfs:
       data_profile: raid1
@@ -65,3 +69,4 @@ filesystem:
 swap:
   main:
     device: lvm.vg0.swap
+    label: swap

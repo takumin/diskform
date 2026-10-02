@@ -237,11 +237,15 @@ plan 層のテストの成功をもって、apply 層の挙動を保証したと
 決まっていない項目について、エージェントが独断で決めることはしません。
 必要になった時点で、メンテナーに確認します。
 
-- 最低サポート Rust バージョン（MSRV）：TBD
+- 最低サポート Rust バージョン（MSRV）：1.85（edition 2024 の下限）
 - 宣言ファイルの形式：YAML または JSON（`docs/adr/0001-declaration-format.md`）
 - `examples/` のディレクトリ構成：`examples/<例の名前>/diskform.yaml`
-- `tests/` のディレクトリ構成：TBD
-- フォーマット、lint、テストの実行コマンド：TBD
+- `tests/` のディレクトリ構成：受け入れテストの層ごとに `tests/<層>/` を置きます。
+  plan 層は `tests/plan/`、apply 層は `tests/apply/` です。
+- フォーマット、lint、テストの実行コマンド：タスクランナーを置かず、cargo を直接使います。
+  - `cargo fmt --check`
+  - `cargo clippy --all-targets -- -D warnings`
+  - `cargo test`
 - apply 層のテストの実行方法（必要な権限と環境）：TBD
 
 ## 8. エージェントの作業手順

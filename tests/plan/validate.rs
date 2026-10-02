@@ -47,7 +47,7 @@ fn examples_are_valid() {
 fn json_is_read_like_yaml() {
     for file in examples() {
         let yaml = std::fs::read_to_string(&file).unwrap();
-        let value: serde_json::Value = serde_norway::from_str(&yaml).unwrap();
+        let value: serde_json::Value = yaml_serde::from_str(&yaml).unwrap();
         let out = run(&["validate"], &write("json", &value.to_string()));
         assert!(out.success, "{}:\n{}", file.display(), out.stderr);
     }

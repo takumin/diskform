@@ -73,7 +73,7 @@ pub fn load(path: &Path) -> Result<Declaration, LoadError> {
 /// Reads the document into a tree, or `None` for an empty document.
 fn tree(text: &str, format: Format) -> Result<Option<Node>, String> {
     match format {
-        Format::Yaml => serde_norway::from_str(text).map_err(|e| e.to_string()),
+        Format::Yaml => yaml_serde::from_str(text).map_err(|e| e.to_string()),
         Format::Json => serde_json::from_str(text).map_err(|e| e.to_string()),
     }
 }

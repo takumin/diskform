@@ -14,7 +14,6 @@ use crate::size::{FixedSize, Size};
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Declaration {
-    #[expect(dead_code, reason = "read only by plan, which is not implemented yet")]
     pub version: Version,
     #[serde(default)]
     pub disk: BTreeMap<Name, Disk>,
@@ -48,9 +47,7 @@ impl<'de> Deserialize<'de> for Version {
 #[serde(deny_unknown_fields)]
 pub struct Disk {
     #[serde(rename = "match")]
-    #[expect(dead_code, reason = "read only by plan, which is not implemented yet")]
     pub matcher: Match,
-    #[expect(dead_code, reason = "read only by plan, which is not implemented yet")]
     pub table: Table,
     pub partitions: Vec<Partition>,
 }
@@ -58,16 +55,23 @@ pub struct Disk {
 /// Conditions that select the disk (ADR 0003).
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[expect(dead_code, reason = "read only by plan, which is not implemented yet")]
 pub struct Match {
     pub path: DevicePath,
     pub min_size: Option<FixedSize>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Table {
     Gpt,
+}
+
+impl fmt::Display for Table {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Table::Gpt => "gpt",
+        })
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -76,22 +80,28 @@ pub struct Partition {
     pub name: Name,
     pub size: Size,
     #[serde(rename = "type")]
-    #[expect(dead_code, reason = "read only by plan, which is not implemented yet")]
     pub kind: Option<PartitionType>,
     pub label: Label,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PartitionType {
     Esp,
+}
+
+impl fmt::Display for PartitionType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            PartitionType::Esp => "esp",
+        })
+    }
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Luks {
     pub device: Ref,
-    #[expect(dead_code, reason = "read only by plan, which is not implemented yet")]
     pub keyfile: AbsolutePath,
 }
 

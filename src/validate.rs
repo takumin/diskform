@@ -305,12 +305,16 @@ const SWAP_LABEL_LIMIT: usize = 16;
 /// A GPT partition name holds 36 UTF-16 code units.
 const PARTLABEL_LIMIT: usize = 36;
 
-/// ADR 0005: label length limits and uniqueness.
+/// ADR 0005, ADR 0008: label length limits and uniqueness. The empty label
+/// means no label, so it has no length and never collides.
 fn check_labels(decl: &Declaration, report: &mut Report) {
     let mut partlabels: BTreeMap<&str, String> = BTreeMap::new();
     for (disk_name, disk) in &decl.disk {
         for (i, p) in disk.partitions.iter().enumerate() {
-            let Some(label) = &p.label else { continue };
+            let label = &p.label;
+            if label.is_none() {
+                continue;
+            }
             let at = format!("disk.{disk_name}.partitions[{i}].label");
             let units = label.as_str().encode_utf16().count();
             if units > PARTLABEL_LIMIT {
@@ -328,18 +332,30 @@ fn check_labels(decl: &Declaration, report: &mut Report) {
     // Filesystem and swap labels share /dev/disk/by-label/.
     let mut labels: BTreeMap<&str, String> = BTreeMap::new();
     for (name, fs) in &decl.filesystem {
-        if let Some(label) = &fs.label {
-            let at = format!("filesystem.{name}.label");
-            check_length(label, label_limit(fs.format), fs.format, &at, report);
-            unique(&mut labels, label, at, report);
+        let label = &fs.label;
+        if label.is_none() {
+            continue;
         }
+        let at = format!("filesystem.{name}.label");
+        check_length(label, label_limit(fs.format), fs.format, &at, report);
+        // mkfs.fat writes `NO NAME` when given no label, and blkid reports
+        // it as no label, so this label could not be told from the empty one.
+        if fs.format == Format::Vfat && label.as_str().trim_end_matches(' ') == "NO NAME" {
+            report(
+                at.clone(),
+                format!("vfat label `{label}` means no label; use '' instead"),
+            );
+        }
+        unique(&mut labels, label, at, report);
     }
     for (name, swap) in &decl.swap {
-        if let Some(label) = &swap.label {
-            let at = format!("swap.{name}.label");
-            check_length(label, SWAP_LABEL_LIMIT, "swap", &at, report);
-            unique(&mut labels, label, at, report);
+        let label = &swap.label;
+        if label.is_none() {
+            continue;
         }
+        let at = format!("swap.{name}.label");
+        check_length(label, SWAP_LABEL_LIMIT, "swap", &at, report);
+        unique(&mut labels, label, at, report);
     }
 }
 

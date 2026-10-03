@@ -79,6 +79,7 @@ partition は `disk.sys0.esp`、LUKS は `luks.cryptsys`、LV は `lvm.vg0.root`
 partition、`filesystem`、`swap` には、`label` でラベルを指定できます。
 partition の `label` は GPT の PARTLABEL に、`filesystem` と `swap` の `label` はファイルシステムと swap のラベルに書きます。
 `label` を省略した場合は、ラベルを書きません。
+（この規則と、次の空の文字列をエラーにする規則は、ADR 0008 で改めました。`label` は必須で、空の文字列がラベルなしを表します。）
 名前をラベルの既定値には使いません。
 
 ラベルには、次の規則を設けます。
@@ -138,3 +139,4 @@ partition の名前を PARTLABEL に、`filesystem` の名前をファイルシ�
   例が必要としたときに、この構造に沿って追加します。
 - `label` は省略できるので、再適用での同定の手がかりになるとは限りません。
   再適用での同定方法と、既存のラベルが宣言と異なる場合の扱いは、別に決めます。
+  （ADR 0008 で `label` を必須にし、ADR 0011 で再適用での同定方法を決めました。）

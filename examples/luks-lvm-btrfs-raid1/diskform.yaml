@@ -8,6 +8,7 @@ disk:
     table: gpt
     partitions:
     - {name: esp, size: 1GiB, type: esp, label: esp}
+    - {name: boot, size: 1GiB, label: boot}
     - {name: crypt, size: 100%, label: cryptsys}
   data0:
     match:
@@ -44,6 +45,11 @@ filesystem:
     label: EFI
     mount: /boot/efi
     mount_options: [umask=0077]
+  boot:
+    device: disk.sys0.boot
+    format: ext4
+    label: boot
+    mount: /boot
   root:
     device: lvm.vg0.root
     format: ext4

@@ -4,7 +4,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 
 use diskform::model::Declaration;
-use diskform::{load, validate};
+use diskform::{load, plan, system, validate};
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -17,6 +17,11 @@ struct Cli {
 enum Command {
     /// Check a declaration without accessing any device
     Validate {
+        /// Declaration file (.yaml, .yml or .json)
+        file: PathBuf,
+    },
+    /// Show what apply would do, reading devices without changing them
+    Plan {
         /// Declaration file (.yaml, .yml or .json)
         file: PathBuf,
     },
@@ -46,6 +51,24 @@ fn main() -> ExitCode {
             }
             println!("{}: valid", file.display());
             ExitCode::SUCCESS
+        }
+        Command::Plan { file } => {
+            let Some(decl) = checked(&file) else {
+                return ExitCode::FAILURE;
+            };
+            let plan = plan::plan(&decl, &system::Host);
+            print!("{plan}");
+            for warning in &plan.warnings {
+                eprintln!("warning: {}: {warning}", file.display());
+            }
+            for issue in &plan.issues {
+                eprintln!("error: {}: {issue}", file.display());
+            }
+            if plan.issues.is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            }
         }
     }
 }

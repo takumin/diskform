@@ -381,6 +381,25 @@ impl TryFrom<String> for AbsolutePath {
 #[serde(try_from = "String")]
 pub struct DevicePath(String);
 
+impl DevicePath {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// The directory and the last component, which may be a wildcard pattern.
+    pub fn split(&self) -> (&str, &str) {
+        self.0
+            .rsplit_once('/')
+            .expect("a device path starts with /dev/")
+    }
+
+    /// Whether the path is a kernel name such as `/dev/sda`, which may
+    /// change between boots, rather than a name under `/dev/disk/by-*/`.
+    pub fn is_kernel_name(&self) -> bool {
+        !self.0.starts_with("/dev/disk/by-")
+    }
+}
+
 impl TryFrom<String> for DevicePath {
     type Error = String;
     fn try_from(s: String) -> Result<Self, String> {

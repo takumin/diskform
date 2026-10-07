@@ -218,33 +218,7 @@ impl fmt::Display for Plan {
 
 pub fn plan(decl: &Declaration, sys: &dyn System) -> Plan {
     let mut plan = Plan::default();
-    for (name, disk) in &decl.disk {
-        if disk.matcher.path.is_kernel_name() {
-            plan.warnings.push(format!(
-                "disk.{name}.match.path: `{}` is a kernel name, which may change between boots",
-                disk.matcher.path.as_str()
-            ));
-        }
-        match resolve(sys, &disk.matcher) {
-            Ok(device) => {
-                if let Some((other, _)) = plan.disks.iter().find(|(_, d)| d.path == device.path) {
-                    plan.issues.push(Issue {
-                        at: format!("disk.{name}.match"),
-                        message: format!(
-                            "resolves to {}, the same device as disk.{other}",
-                            device.path.display()
-                        ),
-                    });
-                } else {
-                    plan.disks.insert(name.clone(), device);
-                }
-            }
-            Err(message) => plan.issues.push(Issue {
-                at: format!("disk.{name}.match"),
-                message,
-            }),
-        }
-    }
+    (plan.disks, plan.warnings, plan.issues) = resolve_disks(decl, sys);
     if !plan.issues.is_empty() {
         return plan;
     }
@@ -338,6 +312,46 @@ pub fn plan(decl: &Declaration, sys: &dyn System) -> Plan {
     plan.operations = operations(decl, &plan.disks, &plan.layout, &creatable);
     plan.unused = unused(decl);
     plan
+}
+
+/// ADR 0003: resolves every disk of the declaration to a distinct device,
+/// with warnings about fragile match conditions and the reasons that some
+/// disks could not be resolved.
+pub(crate) fn resolve_disks(
+    decl: &Declaration,
+    sys: &dyn System,
+) -> (BTreeMap<Name, BlockDevice>, Vec<String>, Vec<Issue>) {
+    let mut disks: BTreeMap<Name, BlockDevice> = BTreeMap::new();
+    let mut warnings = Vec::new();
+    let mut issues = Vec::new();
+    for (name, disk) in &decl.disk {
+        if disk.matcher.path.is_kernel_name() {
+            warnings.push(format!(
+                "disk.{name}.match.path: `{}` is a kernel name, which may change between boots",
+                disk.matcher.path.as_str()
+            ));
+        }
+        match resolve(sys, &disk.matcher) {
+            Ok(device) => {
+                if let Some((other, _)) = disks.iter().find(|(_, d)| d.path == device.path) {
+                    issues.push(Issue {
+                        at: format!("disk.{name}.match"),
+                        message: format!(
+                            "resolves to {}, the same device as disk.{other}",
+                            device.path.display()
+                        ),
+                    });
+                } else {
+                    disks.insert(name.clone(), device);
+                }
+            }
+            Err(message) => issues.push(Issue {
+                at: format!("disk.{name}.match"),
+                message,
+            }),
+        }
+    }
+    (disks, warnings, issues)
 }
 
 /// ADR 0003: resolves the match conditions to exactly one whole disk.

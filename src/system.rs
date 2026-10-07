@@ -1,6 +1,6 @@
-//! Reading the state of the machine. `plan` reads every device state
-//! through `System`, so that plan-layer tests can supply a fake machine.
-//! Nothing here changes a device.
+//! Reading the state of the machine. `plan` and `destroy` read every device
+//! state through `System`, so that plan-layer tests can supply a fake
+//! machine. Nothing here changes a device; `change` does.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -107,6 +107,46 @@ pub struct BtrfsState {
     pub subvolumes: BTreeSet<String>,
 }
 
+/// What a block device is, as `destroy` reads the devices built on a disk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NodeKind {
+    Disk,
+    Partition,
+    /// An open LUKS mapping, by its device-mapper name.
+    Luks {
+        name: String,
+    },
+    /// An active logical volume, by its device-mapper name.
+    LogicalVolume {
+        name: String,
+    },
+    Md,
+    /// A device-mapper device of another kind, by its name and UUID.
+    OtherMapper {
+        name: String,
+        uuid: String,
+    },
+}
+
+/// A block device and its neighbors in the stack of devices.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Node {
+    pub kind: NodeKind,
+    /// The devices built directly on this one (`holders`).
+    pub holders: Vec<PathBuf>,
+    /// The devices this one is built directly on: the disk of a partition,
+    /// or the `slaves` of a device-mapper or md device.
+    pub lower: Vec<PathBuf>,
+}
+
+/// The devices of a btrfs filesystem that this machine has.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BtrfsMembers {
+    pub devices: BTreeSet<PathBuf>,
+    /// The number of devices that the filesystem has.
+    pub count: u64,
+}
+
 pub trait System {
     /// The entry names in `dir`; empty if `dir` does not exist.
     fn read_dir(&self, dir: &Path) -> io::Result<Vec<String>>;
@@ -134,6 +174,13 @@ pub trait System {
     fn btrfs(&self, uuid: &str) -> Result<Option<BtrfsState>, String>;
     /// The names of the device-mapper devices on this machine.
     fn mapper_names(&self) -> Result<Vec<String>, String>;
+    /// A block device and its neighbors (ADR 0016).
+    fn node(&self, device: &Path) -> Result<Node, String>;
+    /// The devices in use, by canonical path, with how each is used: mounted
+    /// filesystems, active swap and the devices of mounted btrfs (ADR 0016).
+    fn uses(&self) -> Result<BTreeMap<PathBuf, String>, String>;
+    /// The devices of the btrfs filesystem with this UUID (ADR 0016).
+    fn btrfs_members(&self, uuid: &str) -> Result<BtrfsMembers, String>;
 }
 
 /// The machine diskform runs on.
@@ -463,7 +510,7 @@ impl System for Host {
         let mut take = |key: &str| values.remove(key);
         Ok(Probe {
             kind: take("ID_FS_TYPE"),
-            version: take("ID_FS_VERSION"),
+            version: take("ID_FS_VERSION").map(|v| decode_hex(&v)),
             label: take("ID_FS_LABEL_ENC").map(|l| decode_hex(&l)),
             uuid: take("ID_FS_UUID_ENC").map(|u| decode_hex(&u)),
             table: take("ID_PART_TABLE_TYPE"),
@@ -611,6 +658,139 @@ impl System for Host {
             }
         }
         Ok(names)
+    }
+
+    fn node(&self, device: &Path) -> Result<Node, String> {
+        let name = device.file_name().unwrap_or_default();
+        let sys = Path::new(SYS_BLOCK).join(name);
+        let error = |e: io::Error| format!("cannot read {}: {e}", sys.display());
+        if !sys.exists() {
+            return Err(format!("{} is not a block device", device.display()));
+        }
+        let under_dev = |names: Vec<String>| -> Vec<PathBuf> {
+            let mut paths: Vec<PathBuf> = names
+                .into_iter()
+                .map(|n| Path::new("/dev").join(n))
+                .collect();
+            paths.sort();
+            paths
+        };
+        let holders = under_dev(names_in(&sys.join("holders")).map_err(error)?);
+        let slaves = || names_in(&sys.join("slaves")).map(under_dev).map_err(error);
+        let (kind, lower) = if sys.join("partition").exists() {
+            // The partition's directory is in its disk's.
+            let real = fs::canonicalize(&sys).map_err(error)?;
+            let disk = real
+                .parent()
+                .and_then(Path::file_name)
+                .ok_or_else(|| format!("cannot find the disk of {}", device.display()))?;
+            (NodeKind::Partition, vec![Path::new("/dev").join(disk)])
+        } else if sys.join("dm").exists() {
+            let name = read_trimmed(&sys.join("dm/name")).unwrap_or_default();
+            let uuid = read_trimmed(&sys.join("dm/uuid")).unwrap_or_default();
+            let kind = if uuid.starts_with("CRYPT-LUKS") {
+                NodeKind::Luks { name }
+            } else if uuid.starts_with("LVM-") {
+                NodeKind::LogicalVolume { name }
+            } else {
+                NodeKind::OtherMapper { name, uuid }
+            };
+            (kind, slaves()?)
+        } else if sys.join("md").exists() {
+            (NodeKind::Md, slaves()?)
+        } else {
+            (NodeKind::Disk, Vec::new())
+        };
+        Ok(Node {
+            kind,
+            holders,
+            lower,
+        })
+    }
+
+    fn uses(&self) -> Result<BTreeMap<PathBuf, String>, String> {
+        let mut uses = BTreeMap::new();
+        let mountinfo = fs::read_to_string("/proc/self/mountinfo")
+            .map_err(|e| format!("cannot read /proc/self/mountinfo: {e}"))?;
+        for line in mountinfo.lines() {
+            let (mount, rest) = line.split_once(" - ").unwrap_or((line, ""));
+            let fields: Vec<&str> = mount.split(' ').collect();
+            let (Some(number), Some(point)) = (fields.get(2), fields.get(4)) else {
+                continue;
+            };
+            let usage = format!("mounted at {}", decode_octal(point));
+            // The device number, and the source for filesystems such as
+            // btrfs whose device number is not that of the block device.
+            let by_number = fs::canonicalize(format!("/sys/dev/block/{number}"))
+                .ok()
+                .and_then(|p| p.file_name().map(|n| Path::new("/dev").join(n)));
+            let by_source = rest
+                .split(' ')
+                .nth(1)
+                .filter(|s| s.starts_with('/'))
+                .and_then(|s| fs::canonicalize(decode_octal(s)).ok());
+            for device in by_number.into_iter().chain(by_source) {
+                uses.entry(device).or_insert_with(|| usage.clone());
+            }
+        }
+        let swaps = fs::read_to_string("/proc/swaps")
+            .map_err(|e| format!("cannot read /proc/swaps: {e}"))?;
+        for line in swaps.lines().skip(1) {
+            if let Some(path) = line.split_whitespace().next() {
+                if let Ok(device) = fs::canonicalize(decode_octal(path)) {
+                    uses.entry(device)
+                        .or_insert_with(|| "active swap".to_owned());
+                }
+            }
+        }
+        let btrfs = Path::new("/sys/fs/btrfs");
+        let error = |e: io::Error| format!("cannot read {}: {e}", btrfs.display());
+        for uuid in names_in(btrfs).map_err(error)? {
+            let devices = btrfs.join(&uuid).join("devices");
+            if !devices.is_dir() {
+                continue;
+            }
+            for name in names_in(&devices).map_err(error)? {
+                uses.entry(Path::new("/dev").join(name))
+                    .or_insert_with(|| format!("a device of the mounted btrfs {uuid}"));
+            }
+        }
+        Ok(uses)
+    }
+
+    fn btrfs_members(&self, uuid: &str) -> Result<BtrfsMembers, String> {
+        let error = |e: io::Error| format!("cannot read {SYS_BLOCK}: {e}");
+        let mut devices = BTreeSet::new();
+        for name in names_in(Path::new(SYS_BLOCK)).map_err(error)? {
+            // Devices without media, such as unused loop devices, are empty.
+            if read_trimmed(&Path::new(SYS_BLOCK).join(&name).join("size")).as_deref() == Some("0")
+            {
+                continue;
+            }
+            let device = Path::new("/dev").join(&name);
+            let values = blkid(&device)?;
+            if values.get("ID_FS_TYPE").is_some_and(|t| t == "btrfs")
+                && values.get("ID_FS_UUID").is_some_and(|u| u == uuid)
+            {
+                devices.insert(device);
+            }
+        }
+        let Some(first) = devices.first() else {
+            return Err(format!("no device of the btrfs {uuid} was found"));
+        };
+        let first = first.to_string_lossy();
+        let out = run("btrfs", &["inspect-internal", "dump-super", &first])?;
+        if !out.status.success() {
+            return Err(failed("btrfs", &out));
+        }
+        let count = String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .find_map(|l| {
+                let (key, value) = l.split_once(char::is_whitespace)?;
+                (key == "num_devices").then(|| value.trim().parse::<u64>().ok())?
+            })
+            .ok_or_else(|| format!("cannot read the number of devices of the btrfs {uuid}"))?;
+        Ok(BtrfsMembers { devices, count })
     }
 }
 

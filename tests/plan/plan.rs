@@ -73,8 +73,8 @@ impl Fake {
                 "/dev/disk/by-id/nvme-Samsung_SSD_980_PRO_1TB_S5GXNX0R123456-part1",
                 "/dev/nvme0n1p1",
             )
-            .disk("/dev/sda", 8_001_563_222_016)
-            .disk("/dev/sdb", 8_001_563_222_016)
+            .disk("/dev/sda", 4_000_787_030_016)
+            .disk("/dev/sdb", 4_000_787_030_016)
             .link("/dev/disk/by-path/pci-0000:00:17.0-ata-1", "/dev/sda")
             .link("/dev/disk/by-path/pci-0000:00:17.0-ata-2", "/dev/sdb")
             .keyfile("/run/keys/sys.key")
@@ -169,10 +169,10 @@ fn example_on_empty_disks() {
         operations(&plan),
         [
             "create gpt partition table on disk.data0 (/dev/sda)".to_owned(),
-            "create partition 1 disk.data0.data0: 7630884 MiB at 1 MiB, type linux, label \"data0\""
+            "create partition 1 disk.data0.data0: 3815446 MiB at 1 MiB, type linux, label \"data0\""
                 .to_owned(),
             "create gpt partition table on disk.data1 (/dev/sdb)".to_owned(),
-            "create partition 1 disk.data1.data1: 7630884 MiB at 1 MiB, type linux, label \"data1\""
+            "create partition 1 disk.data1.data1: 3815446 MiB at 1 MiB, type linux, label \"data1\""
                 .to_owned(),
             "create gpt partition table on disk.sys0 (/dev/nvme0n1)".to_owned(),
             "create partition 1 disk.sys0.esp: 1 GiB at 1 MiB, type esp, label \"esp\"".to_owned(),
@@ -248,6 +248,16 @@ fn disks_are_matched_as_adr_0003_says() {
         &plan,
         "disk.d0.match",
         "matches only disks smaller than min_size 1 TiB",
+    );
+
+    // Regression: a disk sold as 4TB is smaller than 4TiB (ADR 0014).
+    let plan = plan_text(&one_disk("/dev/sda", Some("4TB")), &sys);
+    assert!(plan.issues.is_empty(), "{:#?}", plan.issues);
+    let plan = plan_text(&one_disk("/dev/sda", Some("4TiB")), &sys);
+    assert_issue(
+        &plan,
+        "disk.d0.match",
+        "matches only disks smaller than min_size 4 TiB",
     );
 
     // `min_size` narrows the candidates to exactly one.

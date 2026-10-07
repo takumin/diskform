@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 
 use diskform::layout::MIB;
 use diskform::system::{
-    BlockDevice, BtrfsState, DeviceKind, DiskState, LogicalVolumeState, PartitionEntry,
-    PartitionTable, Probe, System, VolumeGroupState,
+    BlockDevice, BtrfsMembers, BtrfsState, DeviceKind, DiskState, LogicalVolumeState, Node,
+    NodeKind, PartitionEntry, PartitionTable, Probe, System, VolumeGroupState,
 };
 
 pub const GIB: u64 = 1 << 30;
@@ -31,6 +31,14 @@ pub struct Fake {
     /// Mounted btrfs filesystems by UUID.
     pub btrfs: BTreeMap<String, BtrfsState>,
     pub mappers: Vec<String>,
+    /// Device-mapper and md devices, with their kinds and the devices they
+    /// are built on.
+    pub stacked: BTreeMap<PathBuf, (NodeKind, Vec<PathBuf>)>,
+    /// Devices in use and how.
+    pub uses: BTreeMap<PathBuf, String>,
+    /// The number of devices of btrfs filesystems by UUID, if it differs
+    /// from the number of devices that have its signature.
+    pub btrfs_counts: BTreeMap<String, u64>,
 }
 
 pub const LINUX: &str = "0fc63daf-8483-4772-8e79-3d69d8477de4";
@@ -189,6 +197,23 @@ impl Fake {
             .insert("/dev/nvme0n1p3".into(), "/run/keys/sys.key".into());
         sys.mappings
             .insert("/dev/nvme0n1p3".into(), "/dev/dm-0".into());
+        sys = sys.stack(
+            "/dev/dm-0",
+            NodeKind::Luks {
+                name: "cryptsys".to_owned(),
+            },
+            &["/dev/nvme0n1p3"],
+        );
+        for (dm, lv) in [
+            ("/dev/dm-1", "root"),
+            ("/dev/dm-2", "swap"),
+            ("/dev/dm-3", "var"),
+        ] {
+            let kind = NodeKind::LogicalVolume {
+                name: format!("vg0-{lv}"),
+            };
+            sys = sys.stack(dm, kind, &["/dev/dm-0"]);
+        }
         let lv = |size: u64, device: &str| LogicalVolumeState {
             size,
             device: Some(device.into()),
@@ -218,6 +243,13 @@ impl Fake {
             },
         );
         sys
+    }
+
+    /// A device built on others.
+    pub fn stack(mut self, device: &str, kind: NodeKind, lower: &[&str]) -> Self {
+        let lower = lower.iter().map(PathBuf::from).collect();
+        self.stacked.insert(device.into(), (kind, lower));
+        self
     }
 
     pub fn vg0(&mut self) -> &mut VolumeGroupState {
@@ -296,5 +328,51 @@ impl System for Fake {
 
     fn mapper_names(&self) -> Result<Vec<String>, String> {
         Ok(self.mappers.clone())
+    }
+
+    fn node(&self, device: &Path) -> Result<Node, String> {
+        let holders = self
+            .stacked
+            .iter()
+            .filter(|(_, (_, lower))| lower.iter().any(|l| l == device))
+            .map(|(path, _)| path.clone())
+            .collect();
+        let disk = self
+            .tables
+            .iter()
+            .find(|(_, t)| t.partitions.iter().any(|p| p.device == device));
+        let (kind, lower) = if let Some((kind, lower)) = self.stacked.get(device) {
+            (kind.clone(), lower.clone())
+        } else if let Some((disk, _)) = disk {
+            (NodeKind::Partition, vec![disk.clone()])
+        } else if self.devices.contains_key(device) {
+            (NodeKind::Disk, Vec::new())
+        } else {
+            return Err(format!("{} is not a block device", device.display()));
+        };
+        Ok(Node {
+            kind,
+            holders,
+            lower,
+        })
+    }
+
+    fn uses(&self) -> Result<BTreeMap<PathBuf, String>, String> {
+        Ok(self.uses.clone())
+    }
+
+    fn btrfs_members(&self, uuid: &str) -> Result<BtrfsMembers, String> {
+        let devices: BTreeSet<PathBuf> = self
+            .probes
+            .iter()
+            .filter(|(_, p)| p.kind.as_deref() == Some("btrfs") && p.uuid.as_deref() == Some(uuid))
+            .map(|(path, _)| path.clone())
+            .collect();
+        let count = self
+            .btrfs_counts
+            .get(uuid)
+            .copied()
+            .unwrap_or(devices.len() as u64);
+        Ok(BtrfsMembers { devices, count })
     }
 }

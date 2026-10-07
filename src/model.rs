@@ -90,6 +90,17 @@ pub enum PartitionType {
     Esp,
 }
 
+impl PartitionType {
+    /// The GPT partition type GUID of a partition of type `kind`, in lower
+    /// case. A partition without a type holds a Linux filesystem.
+    pub fn gpt_guid(kind: Option<PartitionType>) -> &'static str {
+        match kind {
+            None => "0fc63daf-8483-4772-8e79-3d69d8477de4",
+            Some(PartitionType::Esp) => "c12a7328-f81f-11d2-ba4b-00a0c93ec93b",
+        }
+    }
+}
+
 impl fmt::Display for PartitionType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {

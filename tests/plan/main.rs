@@ -1,6 +1,7 @@
 //! Plan-layer acceptance tests: run without privileges and never touch a
 //! device (AGENTS.md 5).
 
+mod fake;
 mod plan;
 mod validate;
 

@@ -78,7 +78,7 @@ pub struct Partition {
     #[serde(rename = "type")]
     #[expect(dead_code, reason = "read only by plan, which is not implemented yet")]
     pub kind: Option<PartitionType>,
-    pub label: Option<Label>,
+    pub label: Label,
 }
 
 #[derive(Debug, Deserialize)]
@@ -114,7 +114,7 @@ pub struct Filesystem {
     pub device: Option<Ref>,
     pub devices: Option<Vec<Ref>>,
     pub format: Format,
-    pub label: Option<Label>,
+    pub label: Label,
     pub mount: Option<AbsolutePath>,
     pub mount_options: Option<Vec<String>>,
     pub btrfs: Option<BtrfsOptions>,
@@ -182,7 +182,7 @@ pub struct Subvolume {
 #[serde(deny_unknown_fields)]
 pub struct Swap {
     pub device: Ref,
-    pub label: Option<Label>,
+    pub label: Label,
 }
 
 /// A name of a declaration element: `[a-z0-9][a-z0-9_-]*`.
@@ -283,8 +283,9 @@ impl fmt::Display for Ref {
     }
 }
 
-/// A label written to a partition, a filesystem or swap. Never empty; the
-/// length limit depends on where it is written and is checked by `validate`.
+/// A label written to a partition, a filesystem or swap (ADR 0008). The
+/// empty label means that no label is written. The length limit depends on
+/// where it is written and is checked by `validate`.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(try_from = "String")]
 pub struct Label(String);
@@ -293,14 +294,16 @@ impl Label {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// Whether this is the empty label, which means no label.
+    pub fn is_none(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
 impl TryFrom<String> for Label {
     type Error = String;
     fn try_from(s: String) -> Result<Self, String> {
-        if s.is_empty() {
-            return Err("a label must not be empty; omit `label` to write no label".to_owned());
-        }
         if s.chars().any(char::is_control) {
             return Err(format!(
                 "invalid label {s:?}: control characters are not allowed"
@@ -541,7 +544,7 @@ mod tests {
     #[test]
     fn labels() {
         assert!(Label::try_from("EFI".to_owned()).is_ok());
-        assert!(Label::try_from(String::new()).is_err());
+        assert!(Label::try_from(String::new()).unwrap().is_none());
         assert!(Label::try_from("a\nb".to_owned()).is_err());
     }
 }

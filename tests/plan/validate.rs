@@ -30,8 +30,8 @@ disk:
     table: gpt
     partitions:
     - {name: p1, size: 1GiB, label: one}
-    - {name: p2, size: 50%}
-    - {name: p3, size: 50%}
+    - {name: p2, size: 50%, label: ''}
+    - {name: p3, size: 50%, label: ''}
 ";
 
 #[test]
@@ -140,7 +140,7 @@ fn only_values_seen_in_examples_are_accepted() {
         &["unknown variant `bios`"],
     );
     let fs = |format: &str| {
-        format!("{DISK}filesystem:\n  f: {{device: disk.d0.p1, format: {format}}}\n")
+        format!("{DISK}filesystem:\n  f: {{device: disk.d0.p1, format: {format}, label: ''}}\n")
     };
     for format in ["vfat", "ext4", "xfs", "btrfs"] {
         accepts(&fs(format));
@@ -151,13 +151,20 @@ fn only_values_seen_in_examples_are_accepted() {
 #[test]
 fn sizes_follow_the_notation() {
     for size in [
-        "1GB", "1.5GiB", "33.3%", "0%", "101%", "rest", "100%FREE", "0MiB",
+        "1G", "1.5GiB", "1.5GB", "1gb", "1kB", "33.3%", "0%", "101%", "rest", "100%FREE", "0MiB",
+        "0GB",
     ] {
         rejects(
             &DISK.replace("size: 1GiB", &format!("size: \"{size}\"")),
             &["invalid size"],
         );
     }
+    // Binary and decimal units are both accepted (ADR 0014).
+    accepts(
+        &DISK
+            .replace("size: 1GiB", "size: 512MB")
+            .replace("{path: /dev/loop0}", "{path: /dev/loop0, min_size: 4TB}"),
+    );
     rejects(
         &DISK.replace("{path: /dev/loop0}", "{path: /dev/loop0, min_size: 50%}"),
         &["a percentage is not allowed here"],
@@ -232,7 +239,7 @@ fn references_must_point_to_declared_block_devices() {
 #[test]
 fn a_device_has_at_most_one_user() {
     let text = format!(
-        "{DISK}luks:\n  c: {{device: disk.d0.p1, keyfile: /k}}\nswap:\n  s: {{device: disk.d0.p1}}\n"
+        "{DISK}luks:\n  c: {{device: disk.d0.p1, keyfile: /k}}\nswap:\n  s: {{device: disk.d0.p1, label: ''}}\n"
     );
     rejects(
         &text,
@@ -262,7 +269,7 @@ fn unused_devices_are_not_errors() {
 
 #[test]
 fn filesystem_devices_follow_the_format() {
-    let fs = |body: &str| format!("{DISK}filesystem:\n  f: {{{body}}}\n");
+    let fs = |body: &str| format!("{DISK}filesystem:\n  f: {{{body}, label: ''}}\n");
     rejects(
         &fs("format: ext4"),
         &["either `device` or `devices` is required"],
@@ -313,17 +320,22 @@ fn filesystem_devices_follow_the_format() {
 
 #[test]
 fn labels_are_checked() {
+    // `label` is required; the empty label means no label (ADR 0008).
     rejects(
-        &DISK.replace("label: one", "label: ''"),
-        &["a label must not be empty"],
+        &DISK.replace(", label: one", ""),
+        &["disk.d0.partitions[0]: missing field `label`"],
     );
+    accepts(&DISK.replace("label: one", "label: ''"));
     rejects(
         &DISK.replace("label: one", &format!("label: {}", "x".repeat(37))),
         &["is 37 UTF-16 code units, more than 36"],
     );
     accepts(&DISK.replace("label: one", &format!("label: {}", "x".repeat(36))));
     rejects(
-        &DISK.replace("{name: p2, size: 50%}", "{name: p2, size: 50%, label: one}"),
+        &DISK.replace(
+            "{name: p2, size: 50%, label: ''}",
+            "{name: p2, size: 50%, label: one}",
+        ),
         &["disk.d0.partitions[1].label: label `one` is also used at disk.d0.partitions[0].label"],
     );
 
@@ -344,6 +356,20 @@ fn labels_are_checked() {
         );
     }
 
+    // Empty labels have no length limit to exceed and never collide.
+    accepts(&format!(
+        "{DISK}filesystem:\n  f: {{device: disk.d0.p1, format: vfat, label: ''}}\nswap:\n  s: {{device: disk.d0.p2, label: ''}}\n"
+    ));
+    // mkfs.fat writes `NO NAME` for no label, so it cannot be declared.
+    for label in ["NO NAME", "'NO NAME  '"] {
+        rejects(&fs("vfat", label), &["vfat label `NO NAME"]);
+    }
+    accepts(&fs("ext4", "NO NAME"));
+    rejects(
+        &format!("{DISK}filesystem:\n  f: {{device: disk.d0.p1, format: ext4}}\n"),
+        &["filesystem.f: missing field `label`"],
+    );
+
     let swap = |label: &str| format!("{DISK}swap:\n  s: {{device: disk.d0.p2, label: {label}}}\n");
     accepts(&swap(&"x".repeat(16)));
     rejects(&swap(&"x".repeat(17)), &["swap label"]);
@@ -362,14 +388,15 @@ fn labels_are_checked() {
 #[test]
 fn mount_points_are_unique() {
     let text = format!(
-        "{DISK}filesystem:\n  a: {{device: disk.d0.p1, format: ext4, mount: /srv}}\n  b: {{device: disk.d0.p2, format: btrfs, subvolumes: {{s: {{path: '@s', mount: /srv}}}}}}\n"
+        "{DISK}filesystem:\n  a: {{device: disk.d0.p1, format: ext4, label: '', mount: /srv}}\n  b: {{device: disk.d0.p2, format: btrfs, label: '', subvolumes: {{s: {{path: '@s', mount: /srv}}}}}}\n"
     );
     rejects(
         &text,
         &["filesystem.b.subvolumes.s.mount: mount point `/srv` is also used at filesystem.a.mount"],
     );
-    let text =
-        format!("{DISK}filesystem:\n  a: {{device: disk.d0.p1, format: ext4, mount: /srv/}}\n");
+    let text = format!(
+        "{DISK}filesystem:\n  a: {{device: disk.d0.p1, format: ext4, label: '', mount: /srv/}}\n"
+    );
     rejects(&text, &["trailing slash"]);
 }
 

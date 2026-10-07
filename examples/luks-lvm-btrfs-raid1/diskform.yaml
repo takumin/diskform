@@ -4,22 +4,23 @@ disk:
   sys0:
     match:
       path: /dev/disk/by-id/nvme-Samsung_SSD_980_PRO_1TB_*
-      min_size: 900GiB
+      min_size: 1TB
     table: gpt
     partitions:
     - {name: esp, size: 1GiB, type: esp, label: esp}
+    - {name: boot, size: 1GiB, label: boot}
     - {name: crypt, size: 100%, label: cryptsys}
   data0:
     match:
       path: /dev/disk/by-path/pci-0000:00:17.0-ata-1
-      min_size: 4TiB
+      min_size: 4TB
     table: gpt
     partitions:
     - {name: data0, size: 100%, label: data0}
   data1:
     match:
       path: /dev/disk/by-path/pci-0000:00:17.0-ata-2
-      min_size: 4TiB
+      min_size: 4TB
     table: gpt
     partitions:
     - {name: data1, size: 100%, label: data1}
@@ -44,6 +45,11 @@ filesystem:
     label: EFI
     mount: /boot/efi
     mount_options: [umask=0077]
+  boot:
+    device: disk.sys0.boot
+    format: ext4
+    label: boot
+    mount: /boot
   root:
     device: lvm.vg0.root
     format: ext4

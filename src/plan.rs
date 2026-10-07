@@ -7,11 +7,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+use crate::judge::{self, GroupDisk};
 use crate::layout::{self, Extent, Geometry, Layout, format_size};
 use crate::model::{
     BtrfsProfile, Declaration, Format, Label, Match, Name, PartitionType, Ref, SubvolumePath, Table,
 };
-use crate::system::{BlockDevice, DeviceKind, System};
+use crate::system::{BlockDevice, DeviceKind, DiskState, System};
 use crate::validate::Issue;
 
 /// One step of apply, in the order apply would perform it.
@@ -164,6 +165,9 @@ impl fmt::Display for Operation {
 pub struct Plan {
     pub disks: BTreeMap<Name, BlockDevice>,
     pub layout: Layout,
+    /// Groups of disks whose storage is already configured as declared,
+    /// which apply leaves unchanged (ADR 0011).
+    pub configured: Vec<BTreeSet<Name>>,
     pub operations: Vec<Operation>,
     /// Declared devices that nothing uses (ADR 0005).
     pub unused: Vec<Ref>,
@@ -184,6 +188,10 @@ impl fmt::Display for Plan {
                 d.serial.clone().unwrap_or_else(unknown),
                 format_size(d.size)
             )?;
+        }
+        for group in &self.configured {
+            let names: Vec<String> = group.iter().map(|n| format!("disk.{n}")).collect();
+            writeln!(f, "already configured: {}", names.join(", "))?;
         }
         for (name, vg) in &self.layout.volume_groups {
             writeln!(
@@ -265,51 +273,65 @@ pub fn plan(decl: &Declaration, sys: &dyn System) -> Plan {
         }
     }
 
-    // ADR 0011: each group of connected disks is created only if all of
-    // its disks are empty.
+    // ADR 0011: each group of connected disks is created if all of its
+    // disks are empty, and left unchanged if it is configured as declared.
     let groups = groups(decl);
     let mut creatable = BTreeSet::new();
     for group in groups.values().collect::<BTreeSet<_>>() {
-        let mut empty = true;
+        let mut states = BTreeMap::new();
         for name in group {
-            let device = &plan.disks[name];
-            match sys.disk_state(device) {
-                Ok(state) if state.is_empty() => {}
+            match sys.disk_state(&plan.disks[name]) {
                 Ok(state) => {
-                    empty = false;
-                    let found: Vec<String> = state
-                        .signatures
-                        .into_iter()
-                        .chain(
-                            state
-                                .partitions
-                                .into_iter()
-                                .map(|p| format!("partition {p}")),
-                        )
-                        .chain(state.holders.into_iter().map(|h| format!("used by {h}")))
-                        .collect();
-                    plan.issues.push(Issue {
-                        at: format!("disk.{name}"),
-                        message: format!(
-                            "{} is not empty ({}); judging whether existing storage \
-                             satisfies the declaration is not implemented yet (ADR 0011)",
-                            device.path.display(),
-                            found.join(", ")
-                        ),
-                    });
+                    states.insert(name, state);
                 }
-                Err(e) => {
-                    empty = false;
-                    plan.issues.push(Issue {
-                        at: format!("disk.{name}"),
-                        message: e,
-                    });
-                }
+                Err(e) => plan.issues.push(Issue {
+                    at: format!("disk.{name}"),
+                    message: e,
+                }),
             }
         }
-        if empty {
-            creatable.extend(group.iter().cloned());
+        if states.len() < group.len() {
+            continue;
         }
+        if states.values().all(DiskState::is_empty) {
+            creatable.extend(group.iter().cloned());
+            continue;
+        }
+        let disks: Vec<GroupDisk> = states
+            .iter()
+            .map(|(name, state)| GroupDisk {
+                name,
+                device: &plan.disks[*name],
+                state,
+            })
+            .collect();
+        let issues = judge::judge(decl, sys, &plan.layout, &disks);
+        if issues.is_empty() {
+            plan.configured.push(group.clone());
+            continue;
+        }
+        let names: Vec<String> = group
+            .iter()
+            .map(|n| format!("disk.{n} ({})", plan.disks[n].path.display()))
+            .collect();
+        let first = group.first().expect("a group has a disk");
+        plan.issues.push(Issue {
+            at: format!("disk.{first}"),
+            message: if names.len() == 1 {
+                format!(
+                    "{} is neither empty nor configured as declared, so apply would refuse it \
+                     (ADR 0011)",
+                    names[0]
+                )
+            } else {
+                format!(
+                    "the group of {} is neither empty nor configured as declared, so apply \
+                     would refuse it (ADR 0011)",
+                    names.join(", ")
+                )
+            },
+        });
+        plan.issues.extend(issues);
     }
 
     check_existing_names(decl, sys, &creatable, &mut plan.issues);
@@ -397,7 +419,7 @@ fn resolve(sys: &dyn System, m: &Match) -> Result<BlockDevice, String> {
 }
 
 /// The disks that a device is built on.
-fn disks_of(decl: &Declaration, r: &Ref) -> BTreeSet<Name> {
+pub(crate) fn disks_of(decl: &Declaration, r: &Ref) -> BTreeSet<Name> {
     match r {
         Ref::Partition { disk, .. } => BTreeSet::from([disk.clone()]),
         Ref::Luks { name } => disks_of(decl, &decl.luks[name].device),
@@ -463,7 +485,7 @@ fn check_existing_names(
         match sys.volume_groups() {
             Ok(existing) => {
                 for name in vgs {
-                    if existing.iter().any(|e| e == name.as_str()) {
+                    if existing.contains_key(name.as_str()) {
                         issues.push(Issue {
                             at: format!("lvm.{name}"),
                             message: format!("a volume group named `{name}` already exists"),
@@ -673,7 +695,7 @@ impl Builder<'_> {
 }
 
 /// ADR 0005: declared devices that no element uses.
-fn unused(decl: &Declaration) -> Vec<Ref> {
+pub(crate) fn unused(decl: &Declaration) -> Vec<Ref> {
     let used: BTreeSet<&Ref> = decl
         .luks
         .values()

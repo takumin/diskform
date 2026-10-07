@@ -14,7 +14,6 @@ use crate::size::{FixedSize, Size};
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Declaration {
-    #[expect(dead_code, reason = "read only by plan, which is not implemented yet")]
     pub version: Version,
     #[serde(default)]
     pub disk: BTreeMap<Name, Disk>,
@@ -48,9 +47,7 @@ impl<'de> Deserialize<'de> for Version {
 #[serde(deny_unknown_fields)]
 pub struct Disk {
     #[serde(rename = "match")]
-    #[expect(dead_code, reason = "read only by plan, which is not implemented yet")]
     pub matcher: Match,
-    #[expect(dead_code, reason = "read only by plan, which is not implemented yet")]
     pub table: Table,
     pub partitions: Vec<Partition>,
 }
@@ -58,16 +55,23 @@ pub struct Disk {
 /// Conditions that select the disk (ADR 0003).
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[expect(dead_code, reason = "read only by plan, which is not implemented yet")]
 pub struct Match {
     pub path: DevicePath,
     pub min_size: Option<FixedSize>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Table {
     Gpt,
+}
+
+impl fmt::Display for Table {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Table::Gpt => "gpt",
+        })
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -76,22 +80,28 @@ pub struct Partition {
     pub name: Name,
     pub size: Size,
     #[serde(rename = "type")]
-    #[expect(dead_code, reason = "read only by plan, which is not implemented yet")]
     pub kind: Option<PartitionType>,
     pub label: Label,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PartitionType {
     Esp,
+}
+
+impl fmt::Display for PartitionType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            PartitionType::Esp => "esp",
+        })
+    }
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Luks {
     pub device: Ref,
-    #[expect(dead_code, reason = "read only by plan, which is not implemented yet")]
     pub keyfile: AbsolutePath,
 }
 
@@ -370,6 +380,25 @@ impl TryFrom<String> for AbsolutePath {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(try_from = "String")]
 pub struct DevicePath(String);
+
+impl DevicePath {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// The directory and the last component, which may be a wildcard pattern.
+    pub fn split(&self) -> (&str, &str) {
+        self.0
+            .rsplit_once('/')
+            .expect("a device path starts with /dev/")
+    }
+
+    /// Whether the path is a kernel name such as `/dev/sda`, which may
+    /// change between boots, rather than a name under `/dev/disk/by-*/`.
+    pub fn is_kernel_name(&self) -> bool {
+        !self.0.starts_with("/dev/disk/by-")
+    }
+}
 
 impl TryFrom<String> for DevicePath {
     type Error = String;

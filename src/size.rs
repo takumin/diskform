@@ -19,7 +19,18 @@ pub enum Size {
 #[serde(try_from = "String")]
 pub struct FixedSize(pub u64);
 
-const UNITS: [(&str, u32); 4] = [("KiB", 10), ("MiB", 20), ("GiB", 30), ("TiB", 40)];
+/// Binary units (ADR 0002) and decimal units (ADR 0014), with their sizes
+/// in bytes. No suffix is a suffix of another, so the order does not matter.
+const UNITS: [(&str, u64); 8] = [
+    ("KiB", 1 << 10),
+    ("MiB", 1 << 20),
+    ("GiB", 1 << 30),
+    ("TiB", 1 << 40),
+    ("KB", 1_000),
+    ("MB", 1_000_000),
+    ("GB", 1_000_000_000),
+    ("TB", 1_000_000_000_000),
+];
 
 /// Parses a positive decimal integer without sign or leading zeros.
 fn parse_positive(digits: &str) -> Option<u64> {
@@ -43,16 +54,17 @@ impl FromStr for Size {
         }
         let invalid = || {
             format!(
-                "invalid size `{s}`: expected a positive integer with KiB, MiB, GiB or TiB, \
+                "invalid size `{s}`: expected a positive integer with KiB, MiB, GiB, TiB, \
+                 KB, MB, GB or TB, \
                  or a percentage such as 50%"
             )
         };
-        let (digits, shift) = UNITS
+        let (digits, unit) = UNITS
             .iter()
-            .find_map(|(unit, shift)| Some((s.strip_suffix(unit)?, *shift)))
+            .find_map(|(unit, bytes)| Some((s.strip_suffix(unit)?, *bytes)))
             .ok_or_else(invalid)?;
         let n = parse_positive(digits).ok_or_else(invalid)?;
-        n.checked_mul(1 << shift)
+        n.checked_mul(unit)
             .map(Size::Fixed)
             .ok_or_else(|| format!("invalid size `{s}`: too large"))
     }
@@ -90,6 +102,14 @@ mod tests {
     }
 
     #[test]
+    fn parses_decimal_sizes() {
+        assert_eq!("1KB".parse(), Ok(Size::Fixed(1_000)));
+        assert_eq!("512MB".parse(), Ok(Size::Fixed(512_000_000)));
+        assert_eq!("1GB".parse(), Ok(Size::Fixed(1_000_000_000)));
+        assert_eq!("4TB".parse(), Ok(Size::Fixed(4_000_000_000_000)));
+    }
+
+    #[test]
     fn parses_percentages() {
         assert_eq!("1%".parse(), Ok(Size::Percent(1)));
         assert_eq!("100%".parse(), Ok(Size::Percent(100)));
@@ -101,7 +121,13 @@ mod tests {
             "",
             "1",
             "1024",
-            "1GB",
+            "1kB",
+            "1gb",
+            "1Gb",
+            "1GiB ",
+            "1T",
+            "1PB",
+            "99999999TB",
             "1G",
             "1gib",
             "1.5GiB",

@@ -151,13 +151,20 @@ fn only_values_seen_in_examples_are_accepted() {
 #[test]
 fn sizes_follow_the_notation() {
     for size in [
-        "1GB", "1.5GiB", "33.3%", "0%", "101%", "rest", "100%FREE", "0MiB",
+        "1G", "1.5GiB", "1.5GB", "1gb", "1kB", "33.3%", "0%", "101%", "rest", "100%FREE", "0MiB",
+        "0GB",
     ] {
         rejects(
             &DISK.replace("size: 1GiB", &format!("size: \"{size}\"")),
             &["invalid size"],
         );
     }
+    // Binary and decimal units are both accepted (ADR 0014).
+    accepts(
+        &DISK
+            .replace("size: 1GiB", "size: 512MB")
+            .replace("{path: /dev/loop0}", "{path: /dev/loop0, min_size: 4TB}"),
+    );
     rejects(
         &DISK.replace("{path: /dev/loop0}", "{path: /dev/loop0, min_size: 50%}"),
         &["a percentage is not allowed here"],

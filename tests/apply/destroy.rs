@@ -238,6 +238,8 @@ pub const REFUSES_AN_ACTIVE_SWAP: Test = Test {
         build_example();
         run("swapon", &["/dev/vg0/swap"]);
         assert_refused(&destroy_all(), "is active swap");
+        // Without this, powering off the VM waits long for the swap.
+        run("swapoff", &["/dev/vg0/swap"]);
     },
 };
 

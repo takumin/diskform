@@ -61,14 +61,20 @@ impl Vm {
                 "path={},readonly=on,image_type=qcow2",
                 self.dir.join("rootfs.qcow2").display()
             ),
-            format!("path={},readonly=on,serial=payload", payload.display()),
+            format!(
+                "path={},readonly=on,image_type=raw,serial=payload",
+                payload.display()
+            ),
         ];
         for (serial, size) in test.disks {
             let image = work.join(format!("{serial}.img"));
             File::create(&image)
                 .and_then(|f| f.set_len(*size))
                 .map_err(|e| format!("{}: {e}", image.display()))?;
-            disks.push(format!("path={},serial={serial}", image.display()));
+            disks.push(format!(
+                "path={},image_type=raw,serial={serial}",
+                image.display()
+            ));
         }
 
         let console = work.join("console.log");
@@ -153,7 +159,7 @@ fn payload(work: &Path, name: &str) -> Result<PathBuf, String> {
 
     let image = work.join("payload.img");
     File::create(&image)
-        .and_then(|f| f.set_len(size + 64 * MIB))
+        .and_then(|f| f.set_len(size.div_ceil(MIB) * MIB + 64 * MIB))
         .map_err(|e| format!("{}: {e}", image.display()))?;
     let out = Command::new("mkfs.ext4")
         .args(["-q", "-F", "-d"])

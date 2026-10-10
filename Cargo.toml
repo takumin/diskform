@@ -14,3 +14,10 @@ serde_json = "1.0"
 yaml_serde = "0.10"
 serde_path_to_error = "0.1"
 glob = "0.3"
+
+# ADR 0017: the apply-layer tests boot a VM, and run only when
+# DISKFORM_APPLY_VM names the directory of the VM.
+[[test]]
+name = "apply"
+path = "tests/apply/main.rs"
+harness = false

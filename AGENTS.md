@@ -246,7 +246,7 @@ plan 層のテストの成功をもって、apply 層の挙動を保証したと
   - `cargo fmt --check`
   - `cargo clippy --all-targets -- -D warnings`
   - `cargo test`
-- apply 層のテストの実行方法（必要な権限と環境）：TBD
+- apply 層のテストの実行方法（必要な権限と環境）：cloud-hypervisor の VM の中で実行し、環境変数 `DISKFORM_APPLY_VM` で有効にします（`docs/adr/0017-apply-layer-tests.md`）。
 
 ## 8. エージェントの作業手順
 

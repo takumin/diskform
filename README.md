@@ -25,3 +25,16 @@ It shows the operations and asks for `yes` before changing anything; `--auto-app
 
 `apply`, `mount` and `unmount` (ADR 0004) are not implemented yet.
 Design decisions are recorded in `docs/adr/`.
+
+## Testing
+
+`cargo test` runs the plan-layer tests, which need no privileges and read no devices.
+
+The apply-layer tests boot a cloud-hypervisor VM for each test and change only the blank disks of that VM (ADR 0017).
+They need x86-64 Linux with read and write access to `/dev/kvm`, and `mkfs.ext4`.
+Without `DISKFORM_APPLY_VM`, they are skipped and say so.
+
+```console
+$ tests/apply/fetch-vm.sh .vm
+$ DISKFORM_APPLY_VM=$PWD/.vm cargo test --test apply
+```

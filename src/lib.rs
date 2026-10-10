@@ -1,5 +1,7 @@
 //! diskform: declarative block storage provisioning.
 
+pub mod change;
+pub mod destroy;
 pub mod judge;
 pub mod layout;
 pub mod load;

@@ -1,6 +1,6 @@
-//! Reading the state of the machine. `plan` and `destroy` read every device
-//! state through `System`, so that plan-layer tests can supply a fake
-//! machine. Nothing here changes a device; `change` does.
+//! Reading the state of the machine. `plan`, `apply` and `destroy` read
+//! every device state through `System`, so that plan-layer tests can supply
+//! a fake machine. Nothing here changes a device; `change` does.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -170,6 +170,9 @@ pub trait System {
     fn luks_mapping(&self, device: &Path) -> Result<Option<PathBuf>, String>;
     /// The volume groups on this machine, by name.
     fn volume_groups(&self) -> Result<BTreeMap<String, VolumeGroupState>, String>;
+    /// Where the extents of the physical volume on a device start; `None`
+    /// if the device is not a physical volume (ADR 0010).
+    fn pv_data_offset(&self, device: &Path) -> Result<Option<u64>, String>;
     /// The btrfs filesystem with this UUID; `None` if it is not mounted.
     fn btrfs(&self, uuid: &str) -> Result<Option<BtrfsState>, String>;
     /// The names of the device-mapper devices on this machine.
@@ -589,6 +592,19 @@ impl System for Host {
             }
         }
         Ok(groups)
+    }
+
+    fn pv_data_offset(&self, device: &Path) -> Result<Option<u64>, String> {
+        for row in lvm_report("pvs", "pv_name,pe_start")? {
+            let path = PathBuf::from(&row["pv_name"]);
+            if fs::canonicalize(&path).unwrap_or(path) == device {
+                return row["pe_start"]
+                    .parse()
+                    .map(Some)
+                    .map_err(|e| format!("cannot parse `pe_start` of LVM: {e}"));
+            }
+        }
+        Ok(None)
     }
 
     fn btrfs(&self, uuid: &str) -> Result<Option<BtrfsState>, String> {

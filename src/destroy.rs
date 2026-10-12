@@ -338,7 +338,7 @@ pub fn destroy(decl: &Declaration, sys: &dyn System, targets: &Targets) -> Destr
 }
 
 /// What `wipefs` would erase on a device, as blkid names it.
-fn signatures(probe: &Probe) -> Vec<String> {
+pub(crate) fn signatures(probe: &Probe) -> Vec<String> {
     let kind = probe.kind.as_ref().map(|k| match &probe.version {
         Some(v) => format!("{k} (version {v}) signature"),
         None => format!("{k} signature"),

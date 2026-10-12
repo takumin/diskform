@@ -8,6 +8,7 @@
 //! by `tests/apply/fetch-vm.sh`. Otherwise this binary says that it skipped
 //! them, so that `cargo test` does not report them as passed.
 
+mod apply;
 mod destroy;
 mod example;
 mod guest;
@@ -28,6 +29,9 @@ pub struct Test {
 }
 
 const TESTS: &[Test] = &[
+    apply::CREATES_AND_KEEPS_THE_EXAMPLE,
+    apply::REFUSES_A_DISK_WITH_A_SIGNATURE,
+    apply::STOPS_AT_WHAT_EARLIER_STORAGE_LEFT,
     destroy::TEARS_DOWN_THE_EXAMPLE,
     destroy::REFUSES_A_MOUNTED_BTRFS,
     destroy::REFUSES_AN_ACTIVE_SWAP,

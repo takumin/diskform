@@ -112,7 +112,10 @@ impl fmt::Display for Operation {
                 ShowLabel(label)
             ),
             Operation::CreateLuks { name, device } => {
-                write!(f, "create LUKS2 luks.{name} on {device}")
+                write!(
+                    f,
+                    "create LUKS2 luks.{name} on {device}, and open it as {name}"
+                )
             }
             Operation::CreatePhysicalVolume { device } => {
                 write!(f, "create physical volume on {device}")
@@ -174,6 +177,17 @@ pub struct Plan {
     pub warnings: Vec<String>,
     /// Reasons that apply would refuse. The plan is usable only if empty.
     pub issues: Vec<Issue>,
+}
+
+impl Plan {
+    /// Whether another plan finds the same disks and operations, so that
+    /// what the user confirmed is still what would be done (ADR 0018).
+    pub fn same_as(&self, other: &Plan) -> bool {
+        other.issues.is_empty()
+            && self.disks == other.disks
+            && self.configured == other.configured
+            && self.operations == other.operations
+    }
 }
 
 impl fmt::Display for Plan {
@@ -628,10 +642,18 @@ fn operations(
                 .as_ref()
                 .map(|o| (o.data_profile, o.metadata_profile)),
         });
-        for sub in fs.subvolumes.iter().flat_map(|s| s.values()) {
+        // A subvolume comes after those that its path is under.
+        let mut paths: Vec<&SubvolumePath> = fs
+            .subvolumes
+            .iter()
+            .flat_map(|s| s.values())
+            .map(|s| &s.path)
+            .collect();
+        paths.sort();
+        for path in paths {
             b.ops.push(Operation::CreateSubvolume {
                 filesystem: name.clone(),
-                path: sub.path.clone(),
+                path: path.clone(),
             });
         }
     }

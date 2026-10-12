@@ -118,7 +118,10 @@ pub const STOPS_AT_WHAT_EARLIER_STORAGE_LEFT: Test = Test {
             (partition("data0", 1), "btrfs"),
             (partition("data1", 1), "btrfs"),
         ] {
-            assert_eq!(signatures(&device), [kind], "{device}");
+            // wipefs lists each copy of a signature, such as those of vfat.
+            let found = signatures(&device);
+            assert!(found.iter().all(|s| s == kind), "{device} has {found:?}");
+            assert!(!found.is_empty(), "{device} lost its {kind} signature");
         }
 
         // ADR 0011: apply does not continue what it left partly done.

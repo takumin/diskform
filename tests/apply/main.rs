@@ -9,6 +9,7 @@
 //! them, so that `cargo test` does not report them as passed.
 
 mod destroy;
+mod example;
 mod guest;
 mod vm;
 

@@ -328,6 +328,9 @@ impl System for Machine {
     fn volume_groups(&self) -> Result<BTreeMap<String, VolumeGroupState>, String> {
         self.fake.borrow().volume_groups()
     }
+    fn pv_data_offset(&self, device: &Path) -> Result<Option<u64>, String> {
+        self.fake.borrow().pv_data_offset(device)
+    }
     fn btrfs(&self, uuid: &str) -> Result<Option<BtrfsState>, String> {
         self.fake.borrow().btrfs(uuid)
     }

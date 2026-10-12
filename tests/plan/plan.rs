@@ -67,7 +67,7 @@ fn example_on_empty_disks() {
                 "create partition 3 disk.sys0.crypt: {} MiB at 2049 MiB, type linux, label \"cryptsys\"",
                 crypt / MIB
             ),
-            "create LUKS2 luks.cryptsys on disk.sys0.crypt".to_owned(),
+            "create LUKS2 luks.cryptsys on disk.sys0.crypt, and open it as cryptsys".to_owned(),
             "create physical volume on luks.cryptsys".to_owned(),
             "create volume group vg0 on luks.cryptsys".to_owned(),
             "create logical volume lvm.vg0.root: 64 GiB".to_owned(),

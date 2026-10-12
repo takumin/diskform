@@ -322,6 +322,9 @@ impl System for Fake {
         Ok(self.volume_groups.clone())
     }
 
+    fn pv_data_offset(&self, _: &Path) -> Result<Option<u64>, String> {
+        Err("plan and destroy do not read the data offset of a physical volume".to_owned())
+    }
     fn btrfs(&self, uuid: &str) -> Result<Option<BtrfsState>, String> {
         Ok(self.btrfs.get(uuid).cloned())
     }

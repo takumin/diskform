@@ -12,6 +12,7 @@ mod apply;
 mod destroy;
 mod example;
 mod guest;
+mod mount;
 mod vm;
 
 use std::env;
@@ -32,6 +33,9 @@ const TESTS: &[Test] = &[
     apply::CREATES_AND_KEEPS_THE_EXAMPLE,
     apply::REFUSES_A_DISK_WITH_A_SIGNATURE,
     apply::STOPS_AT_WHAT_EARLIER_STORAGE_LEFT,
+    mount::MOUNTS_AND_UNMOUNTS_THE_EXAMPLE,
+    mount::REFUSES_STORAGE_UNLIKE_THE_DECLARATION,
+    mount::UNMOUNT_REFUSES_WHAT_IT_DOES_NOT_STOP,
     destroy::TEARS_DOWN_THE_EXAMPLE,
     destroy::REFUSES_A_MOUNTED_BTRFS,
     destroy::REFUSES_AN_ACTIVE_SWAP,

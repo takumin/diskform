@@ -3,7 +3,7 @@
 use std::fs;
 
 use crate::example::{DECLARATION, DISKS, assert_example_intact, build_example};
-use crate::guest::{disk, diskform, partition, run, signatures};
+use crate::guest::{disk, diskform, mappers, partition, run, signatures};
 use crate::{GIB, MIB, Test};
 
 fn destroy_all() -> std::process::Output {
@@ -38,17 +38,7 @@ pub const TEARS_DOWN_THE_EXAMPLE: Test = Test {
             );
             assert_eq!(tree.lines().count(), 1, "{device} still has\n{tree}");
         }
-        let mappers = fs::read_dir("/sys/class/block")
-            .unwrap()
-            .filter(|e| {
-                e.as_ref()
-                    .unwrap()
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with("dm-")
-            })
-            .count();
-        assert_eq!(mappers, 0, "device-mapper devices are left");
+        assert_eq!(mappers(), 0, "device-mapper devices are left");
 
         let again = destroy_all();
         assert!(again.status.success());

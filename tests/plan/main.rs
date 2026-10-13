@@ -3,6 +3,7 @@
 
 mod destroy;
 mod fake;
+mod mount;
 mod plan;
 mod validate;
 

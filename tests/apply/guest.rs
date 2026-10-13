@@ -58,6 +58,21 @@ pub fn diskform(args: &[&str]) -> Output {
     out
 }
 
+/// The number of device-mapper devices, such as LUKS mappings and active
+/// logical volumes.
+pub fn mappers() -> usize {
+    std::fs::read_dir("/sys/class/block")
+        .unwrap()
+        .filter(|e| {
+            e.as_ref()
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with("dm-")
+        })
+        .count()
+}
+
 /// The types of the signatures that wipefs finds on a device.
 pub fn signatures(device: &str) -> Vec<String> {
     run(

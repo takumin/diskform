@@ -80,7 +80,8 @@ pub const MOUNTS_AND_UNMOUNTS_THE_EXAMPLE: Test = Test {
         for (target, fstype, option) in [
             ("/mnt/target ", "ext4", "rw"),
             ("/mnt/target/boot ", "ext4", "rw"),
-            ("/mnt/target/boot/efi ", "vfat", "umask=0077"),
+            // The kernel shows umask=0077 as both masks.
+            ("/mnt/target/boot/efi ", "vfat", "fmask=0077,dmask=0077"),
             ("/mnt/target/var ", "xfs", "rw"),
             ("/mnt/target/srv ", "btrfs", "subvol=/@srv"),
             ("/mnt/target/srv/.snapshots ", "btrfs", "subvol=/@snapshots"),

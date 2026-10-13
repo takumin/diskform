@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 
 use diskform::layout::MIB;
 use diskform::system::{
-    BlockDevice, BtrfsMembers, BtrfsState, DeviceKind, DiskState, LogicalVolumeState, Node,
-    NodeKind, PartitionEntry, PartitionTable, Probe, System, VolumeGroupState,
+    BlockDevice, BtrfsMembers, BtrfsState, DeviceKind, DiskState, LogicalVolumeState, MountEntry,
+    Node, NodeKind, PartitionEntry, PartitionTable, Probe, System, VolumeGroupState,
 };
 
 pub const GIB: u64 = 1 << 30;
@@ -377,5 +377,9 @@ impl System for Fake {
             .copied()
             .unwrap_or(devices.len() as u64);
         Ok(BtrfsMembers { devices, count })
+    }
+
+    fn mounts(&self) -> Result<Vec<MountEntry>, String> {
+        Err("plan and destroy do not read the mounts".to_owned())
     }
 }

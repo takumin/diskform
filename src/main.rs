@@ -7,7 +7,7 @@ use clap::{ArgGroup, Parser, Subcommand};
 use diskform::destroy::{self, Targets};
 use diskform::model::Declaration;
 use diskform::system::{Host, System};
-use diskform::{apply, load, plan, validate};
+use diskform::{apply, load, mount, plan, validate};
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -35,6 +35,22 @@ enum Command {
         /// Do not ask for confirmation
         #[arg(long)]
         auto_approve: bool,
+    },
+    /// Open, activate and mount the configured storage under a root directory
+    Mount {
+        /// Declaration file (.yaml, .yml or .json)
+        file: PathBuf,
+        /// The directory that the mount points of the declaration are under
+        #[arg(long, value_name = "DIR")]
+        root: PathBuf,
+    },
+    /// Unmount, deactivate and close what mount put to use
+    Unmount {
+        /// Declaration file (.yaml, .yml or .json)
+        file: PathBuf,
+        /// The directory that the mount points of the declaration are under
+        #[arg(long, value_name = "DIR")]
+        root: PathBuf,
     },
     /// Erase the existing storage on the given disks of the declaration
     #[command(group(ArgGroup::new("targets").required(true).args(["target", "all"])))]
@@ -97,6 +113,8 @@ fn main() -> ExitCode {
             }
         }
         Command::Apply { file, auto_approve } => apply_command(&file, auto_approve),
+        Command::Mount { file, root } => mount_command(&file, &root, false),
+        Command::Unmount { file, root } => mount_command(&file, &root, true),
         Command::Destroy {
             file,
             target,
@@ -248,6 +266,32 @@ fn apply_command(file: &Path, auto_approve: bool) -> ExitCode {
                 "apply refuses disks that it left partly configured; erase them with destroy \
                  before applying again (ADR 0011)"
             );
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn mount_command(file: &Path, root: &Path, unmount: bool) -> ExitCode {
+    let Some(decl) = checked(file) else {
+        return ExitCode::FAILURE;
+    };
+    let mut warn = |w: String| eprintln!("warning: {}: {w}", file.display());
+    let mut done = |step: String| println!("done: {step}");
+    let result = if unmount {
+        mount::unmount(&decl, &Host, &Host, root, &mut warn, &mut done).map(|changed| {
+            if !changed {
+                println!("nothing to unmount");
+            }
+        })
+    } else {
+        mount::mount(&decl, &Host, &Host, root, &mut warn, &mut done)
+    };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(issues) => {
+            report(file, &[], &issues);
+            let command = if unmount { "unmount" } else { "mount" };
+            eprintln!("{command} stopped; the steps shown as done above were done");
             ExitCode::FAILURE
         }
     }

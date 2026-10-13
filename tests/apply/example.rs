@@ -46,7 +46,12 @@ lvm:
       swap: {size: 64MiB}
       var: {size: 100%}
 filesystem:
-  efi: {device: disk.sys0.esp, format: vfat, label: EFI, mount: /boot/efi}
+  efi:
+    device: disk.sys0.esp
+    format: vfat
+    label: EFI
+    mount: /boot/efi
+    mount_options: [umask=0077]
   boot: {device: disk.sys0.boot, format: ext4, label: boot, mount: /boot}
   root: {device: lvm.vg0.root, format: ext4, label: root, mount: /}
   var: {device: lvm.vg0.var, format: xfs, label: var, mount: /var}
@@ -54,6 +59,7 @@ filesystem:
     devices: [disk.data0.data0, disk.data1.data1]
     format: btrfs
     label: data
+    mount_options: ['compress=zstd:3']
     btrfs: {data_profile: raid1, metadata_profile: raid1}
     subvolumes:
       srv: {path: '@srv', mount: /srv}

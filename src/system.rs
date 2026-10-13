@@ -139,6 +139,19 @@ pub struct Node {
     pub lower: Vec<PathBuf>,
 }
 
+/// A mount, as `/proc/self/mountinfo` shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MountEntry {
+    /// Where it is mounted.
+    pub target: PathBuf,
+    /// The canonical path of the block device it is mounted from; `None`
+    /// if it is not from a block device.
+    pub source: Option<PathBuf>,
+    /// The directory of the filesystem that is mounted, such as `/@srv`
+    /// for a btrfs subvolume.
+    pub root: String,
+}
+
 /// The devices of a btrfs filesystem that this machine has.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BtrfsMembers {
@@ -184,6 +197,8 @@ pub trait System {
     fn uses(&self) -> Result<BTreeMap<PathBuf, String>, String>;
     /// The devices of the btrfs filesystem with this UUID (ADR 0016).
     fn btrfs_members(&self, uuid: &str) -> Result<BtrfsMembers, String>;
+    /// The mounts of the mount namespace diskform runs in (ADR 0019).
+    fn mounts(&self) -> Result<Vec<MountEntry>, String>;
 }
 
 /// The machine diskform runs on.
@@ -807,6 +822,39 @@ impl System for Host {
             })
             .ok_or_else(|| format!("cannot read the number of devices of the btrfs {uuid}"))?;
         Ok(BtrfsMembers { devices, count })
+    }
+
+    fn mounts(&self) -> Result<Vec<MountEntry>, String> {
+        let mountinfo = fs::read_to_string("/proc/self/mountinfo")
+            .map_err(|e| format!("cannot read /proc/self/mountinfo: {e}"))?;
+        let mut mounts = Vec::new();
+        for line in mountinfo.lines() {
+            let (mount, rest) = line.split_once(" - ").unwrap_or((line, ""));
+            let fields: Vec<&str> = mount.split(' ').collect();
+            let (Some(number), Some(root), Some(target)) =
+                (fields.get(2), fields.get(3), fields.get(4))
+            else {
+                continue;
+            };
+            // The source names the device of filesystems such as btrfs,
+            // whose device number is not that of a block device.
+            let by_source = rest
+                .split(' ')
+                .nth(1)
+                .filter(|s| s.starts_with("/dev/"))
+                .and_then(|s| fs::canonicalize(decode_octal(s)).ok());
+            let by_number = || {
+                fs::canonicalize(format!("/sys/dev/block/{number}"))
+                    .ok()
+                    .and_then(|p| p.file_name().map(|n| Path::new("/dev").join(n)))
+            };
+            mounts.push(MountEntry {
+                target: PathBuf::from(decode_octal(target)),
+                source: by_source.or_else(by_number),
+                root: decode_octal(root),
+            });
+        }
+        Ok(mounts)
     }
 }
 

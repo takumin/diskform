@@ -10,8 +10,8 @@ use diskform::change::Change;
 use diskform::destroy::{Destruction, Targets, destroy, execute};
 use diskform::load;
 use diskform::system::{
-    BlockDevice, BtrfsMembers, BtrfsState, DiskState, Node, NodeKind, PartitionTable, Probe,
-    System, VolumeGroupState,
+    BlockDevice, BtrfsMembers, BtrfsState, DiskState, MountEntry, Node, NodeKind, PartitionTable,
+    Probe, System, VolumeGroupState,
 };
 
 use crate::fake::*;
@@ -345,6 +345,9 @@ impl System for Machine {
     }
     fn btrfs_members(&self, uuid: &str) -> Result<BtrfsMembers, String> {
         self.fake.borrow().btrfs_members(uuid)
+    }
+    fn mounts(&self) -> Result<Vec<MountEntry>, String> {
+        self.fake.borrow().mounts()
     }
 }
 

@@ -75,7 +75,10 @@ fn targets(decl: &Declaration) -> Vec<Target> {
 
 /// Where a mount point of the declaration is under `root`.
 fn under(root: &Path, mount: &str) -> PathBuf {
-    root.join(mount.trim_start_matches('/'))
+    match mount.trim_start_matches('/') {
+        "" => root.to_owned(),
+        relative => root.join(relative),
+    }
 }
 
 fn fail(message: String) -> Vec<Issue> {

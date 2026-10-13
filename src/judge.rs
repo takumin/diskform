@@ -18,20 +18,56 @@ pub struct GroupDisk<'a> {
     pub state: &'a DiskState,
 }
 
-/// The differences between the existing storage of a group and the
-/// declaration, and the items that cannot be compared without changing the
-/// state of the machine. The group is configured if there are none.
+/// What cannot be compared without changing the state of the machine
+/// (ADR 0011, ADR 0015), and what `mount` changes so that it can be.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Unread {
+    /// A LUKS device that is not open, so what is on it.
+    ClosedLuks { name: Name, device: PathBuf },
+    /// A logical volume that is not active, so what is on it.
+    InactiveVolume { vg: Name },
+    /// A btrfs that is not mounted, so its devices, profiles and subvolumes.
+    UnmountedBtrfs { name: Name },
+}
+
+/// How the existing storage of a group compares with the declaration.
+#[derive(Debug, Default)]
+pub struct Judgment {
+    /// The differences from the declaration.
+    pub issues: Vec<Issue>,
+    /// What could not be compared, each with the issue that says so.
+    pub unread: Vec<(Unread, Issue)>,
+    /// The existing devices of the declared ones that were found.
+    pub devices: BTreeMap<Ref, PathBuf>,
+}
+
+impl Judgment {
+    /// Whether the group is configured as declared.
+    pub fn configured(&self) -> bool {
+        self.issues.is_empty() && self.unread.is_empty()
+    }
+
+    /// Every issue, the unread items included, as plan reports them.
+    pub fn into_issues(self) -> Vec<Issue> {
+        let mut issues = self.issues;
+        issues.extend(self.unread.into_iter().map(|(_, i)| i));
+        issues
+    }
+}
+
+/// Compares the existing storage of a group with the declaration.
 pub fn judge(
     decl: &Declaration,
     sys: &dyn System,
     layout: &Layout,
     group: &[GroupDisk],
-) -> Vec<Issue> {
+) -> Judgment {
     let mut j = Judge {
         decl,
         sys,
         layout,
         issues: Vec::new(),
+        unread: Vec::new(),
         devices: BTreeMap::new(),
         judged_vgs: BTreeSet::new(),
         existing_vgs: None,
@@ -69,7 +105,15 @@ pub fn judge(
             j.swap(name, &swap.device, &swap.label);
         }
     }
-    j.issues
+    Judgment {
+        issues: j.issues,
+        unread: j.unread,
+        devices: j
+            .devices
+            .into_iter()
+            .filter_map(|(r, d)| Some((r, d?)))
+            .collect(),
+    }
 }
 
 fn describe_label(label: Option<&str>) -> String {
@@ -104,6 +148,7 @@ struct Judge<'a> {
     sys: &'a dyn System,
     layout: &'a Layout,
     issues: Vec<Issue>,
+    unread: Vec<(Unread, Issue)>,
     /// The existing devices of the declared ones that could be found.
     devices: BTreeMap<Ref, Option<PathBuf>>,
     judged_vgs: BTreeSet<Name>,
@@ -114,6 +159,10 @@ struct Judge<'a> {
 impl Judge<'_> {
     fn report(&mut self, at: String, message: String) {
         self.issues.push(Issue { at, message });
+    }
+
+    fn unread(&mut self, unread: Unread, at: String, message: String) {
+        self.unread.push((unread, Issue { at, message }));
     }
 
     fn probe(&mut self, at: &str, device: &Path) -> Option<Probe> {
@@ -288,7 +337,12 @@ impl Judge<'_> {
             Ok(None) => {
                 // Nothing is left uncompared if nothing is built on it.
                 if !unused(self.decl).contains(&Ref::Luks { name: name.clone() }) {
-                    self.report(
+                    let unread = Unread::ClosedLuks {
+                        name: name.clone(),
+                        device: device.clone(),
+                    };
+                    self.unread(
+                        unread,
                         at,
                         format!(
                             "{shown} is not open, so what is built on it cannot be compared \
@@ -398,7 +452,8 @@ impl Judge<'_> {
                 }
             }
             if found.device.is_none() {
-                self.report(
+                self.unread(
+                    Unread::InactiveVolume { vg: name.clone() },
                     at,
                     "the logical volume is not active, so what is on it cannot be compared \
                      without activating it (ADR 0015)"
@@ -455,17 +510,18 @@ impl Judge<'_> {
             uuids.insert(probe.uuid);
         }
         if fs.format == Format::Btrfs {
-            self.btrfs(&at, fs, &paths, uuids);
+            self.btrfs(name, fs, &paths, uuids);
         }
     }
 
     fn btrfs(
         &mut self,
-        at: &str,
+        name: &Name,
         fs: &Filesystem,
         paths: &[PathBuf],
         uuids: BTreeSet<Option<String>>,
     ) {
+        let at = &format!("filesystem.{name}");
         let uuid = match <[_; 1]>::try_from(uuids.into_iter().collect::<Vec<_>>()) {
             Ok([Some(uuid)]) => uuid,
             Ok([None]) => {
@@ -483,7 +539,8 @@ impl Judge<'_> {
         let existing = match self.sys.btrfs(&uuid) {
             Ok(Some(b)) => b,
             Ok(None) => {
-                self.report(
+                self.unread(
+                    Unread::UnmountedBtrfs { name: name.clone() },
                     at.to_owned(),
                     format!(
                         "btrfs {uuid} is not mounted, so its devices, profiles and subvolumes \

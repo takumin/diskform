@@ -293,8 +293,8 @@ pub fn plan(decl: &Declaration, sys: &dyn System) -> Plan {
                 state,
             })
             .collect();
-        let issues = judge::judge(decl, sys, &plan.layout, &disks);
-        if issues.is_empty() {
+        let judgment = judge::judge(decl, sys, &plan.layout, &disks);
+        if judgment.configured() {
             plan.configured.push(group.clone());
             continue;
         }
@@ -319,7 +319,7 @@ pub fn plan(decl: &Declaration, sys: &dyn System) -> Plan {
                 )
             },
         });
-        plan.issues.extend(issues);
+        plan.issues.extend(judgment.into_issues());
     }
 
     check_existing_names(decl, sys, &creatable, &mut plan.issues);
@@ -461,7 +461,7 @@ pub(crate) fn disks_of(decl: &Declaration, r: &Ref) -> BTreeSet<Name> {
 
 /// ADR 0011: maps each disk to the group of disks connected to it through
 /// the elements built on them.
-fn groups(decl: &Declaration) -> BTreeMap<Name, BTreeSet<Name>> {
+pub(crate) fn groups(decl: &Declaration) -> BTreeMap<Name, BTreeSet<Name>> {
     let mut groups: BTreeMap<Name, BTreeSet<Name>> = decl
         .disk
         .keys()

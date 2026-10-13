@@ -3,7 +3,7 @@ Declarative block storage provisioner: partitions, RAID, LUKS, LVM and btrfs fro
 
 ## Status
 
-`validate`, `plan`, `apply` and `destroy` are implemented.
+`validate`, `plan`, `apply`, `mount`, `unmount` and `destroy` are implemented.
 
 `validate` reads a declaration (`.yaml`, `.yml` or `.json`) and checks it without accessing any device.
 
@@ -21,7 +21,7 @@ A group is judged configured only if every compared item can be read without cha
 It refuses if `plan` finds any problem, and does nothing for groups that are already configured.
 Before each operation it checks that blkid finds nothing on the devices it writes on, so it stops instead of writing over signatures that earlier storage left inside the new partitions; erase such disks with `destroy` and apply again.
 After each operation it reads back what it made, and it stops at the first failure and shows the state of the disks.
-It leaves the LUKS mappings open and the volume groups active, and unmounts the btrfs that it mounts to create subvolumes, so applying again right after it refuses the group of a btrfs until the btrfs is mounted.
+It leaves the LUKS mappings open and the volume groups active, and unmounts the btrfs that it mounts to create subvolumes, so applying again right after it refuses the group of a btrfs until the btrfs is mounted, for example with `mount`.
 
 `destroy` erases the existing storage on the disks given with `--target disk.<name>` (repeatable) or `--all` (ADR 0004, ADR 0016).
 It deactivates the volume groups and closes the LUKS mappings on those disks, erases every signature on their partitions and then the partition table and signatures on the disks themselves with `wipefs`, and checks that each disk is left empty.
@@ -29,7 +29,14 @@ Tools no longer recognize the erased storage, but the data itself is not overwri
 It refuses if anything on the disks is mounted or used as swap, if storage on them also spans disks that are not targets, or if they hold md arrays or device-mapper devices other than LUKS mappings and logical volumes.
 It shows the operations and asks for `yes` before changing anything; `--auto-approve` skips only that question.
 
-`mount` and `unmount` (ADR 0004) are not implemented yet.
+`mount --root DIR` puts the configured storage to use (ADR 0019).
+It judges every group as `plan` does and refuses anything that differs from the declaration, then opens the LUKS devices and activates the volume groups one layer at a time, judging again after each, and mounts the filesystems and subvolumes under `DIR` with their `mount_options`.
+It creates missing mount point directories, does nothing for what is already mounted, and does not enable swap.
+After it, applying again finds every group configured.
+
+`unmount --root DIR` unmounts the declared mounts under `DIR`, deactivates the declared volume groups and closes the declared LUKS mappings.
+It refuses before changing anything if something undeclared is mounted under `DIR`, or if what it would remove is mounted elsewhere, used as swap or held by undeclared devices.
+
 Design decisions are recorded in `docs/adr/`.
 
 ## Testing

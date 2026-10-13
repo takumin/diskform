@@ -4,6 +4,7 @@
 //! through `System` and changing through `Create`.
 
 use std::collections::BTreeSet;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::change::Create;
@@ -364,9 +365,20 @@ impl Applier<'_> {
         devices: &[PathBuf],
         f: impl FnOnce(&Path) -> Result<T, String>,
     ) -> Result<T, String> {
-        let dir = self.create.mount_btrfs(devices)?;
+        let parent = Path::new("/run/diskform");
+        let dir = parent.join(std::process::id().to_string());
+        fs::create_dir_all(parent)
+            .and_then(|()| fs::create_dir(&dir))
+            .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+        if let Err(e) = self.create.mount(Format::Btrfs, devices, &[], &dir) {
+            let _ = fs::remove_dir(&dir);
+            return Err(e);
+        }
         let result = f(&dir);
-        match self.create.unmount(&dir) {
+        let unmounted = self.create.unmount(&dir).and_then(|()| {
+            fs::remove_dir(&dir).map_err(|e| format!("cannot remove {}: {e}", dir.display()))
+        });
+        match unmounted {
             Ok(()) => result,
             Err(e) => {
                 let left = format!("{e}; the btrfs is left mounted at {}", dir.display());

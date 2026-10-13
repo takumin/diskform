@@ -1,10 +1,10 @@
 //! Changing the storage of the machine. `destroy` tears storage down
 //! through `Change` (ADR 0016), so that its order and its handling of
-//! failures can be tested against a fake machine. `apply` builds storage
-//! through `Create` (ADR 0018). Neither checks what it did; the callers
-//! read the result back through `System`.
+//! failures can be tested against a fake machine. `mount` and `unmount`
+//! put storage to use and stop using it through `Activate` (ADR 0019), and
+//! `apply` builds storage through `Create` (ADR 0018). None of them checks
+//! what it did; the callers read the result back through `System`.
 
-use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -24,10 +24,26 @@ pub trait Change {
     fn forget_partitions(&self, disk: &Path) -> Result<(), String>;
 }
 
+/// Puts storage to use and stops using it (ADR 0019), besides tearing it
+/// down as `Change` does.
+pub trait Activate: Change {
+    fn open_luks(&self, device: &Path, keyfile: &Path, name: &str) -> Result<(), String>;
+    fn activate_volume_group(&self, name: &str) -> Result<(), String>;
+    /// Mounts a filesystem on the existing directory `target`.
+    fn mount(
+        &self,
+        format: Format,
+        devices: &[PathBuf],
+        options: &[String],
+        target: &Path,
+    ) -> Result<(), String>;
+    fn unmount(&self, target: &Path) -> Result<(), String>;
+}
+
 /// Builds storage for apply (ADR 0018). Each method makes one thing, and
 /// returns after udev has handled the events it caused, so that the next
 /// one finds the devices in place.
-pub trait Create {
+pub trait Create: Activate {
     fn create_table(&self, disk: &Path, table: Table) -> Result<(), String>;
     /// Appends partition `number`, with its start and size in logical
     /// sectors.
@@ -41,7 +57,6 @@ pub trait Create {
         label: &str,
     ) -> Result<(), String>;
     fn format_luks(&self, device: &Path, keyfile: &Path) -> Result<(), String>;
-    fn open_luks(&self, device: &Path, keyfile: &Path, name: &str) -> Result<(), String>;
     fn create_physical_volume(&self, device: &Path) -> Result<(), String>;
     fn create_volume_group(&self, name: &str, devices: &[PathBuf]) -> Result<(), String>;
     /// Creates and activates a logical volume of `size` bytes.
@@ -54,10 +69,6 @@ pub trait Create {
         profiles: Option<(BtrfsProfile, BtrfsProfile)>,
     ) -> Result<(), String>;
     fn create_swap(&self, device: &Path, label: &str) -> Result<(), String>;
-    /// Mounts a btrfs on a new directory, and returns the directory.
-    fn mount_btrfs(&self, devices: &[PathBuf]) -> Result<PathBuf, String>;
-    /// Unmounts what `mount_btrfs` mounted, and removes the directory.
-    fn unmount(&self, dir: &Path) -> Result<(), String>;
     /// Creates a subvolume at `path` in a mounted btrfs.
     fn create_subvolume(&self, dir: &Path, path: &str) -> Result<(), String>;
 }
@@ -124,6 +135,55 @@ impl Change for Host {
     }
 }
 
+impl Activate for Host {
+    fn open_luks(&self, device: &Path, keyfile: &Path, name: &str) -> Result<(), String> {
+        let args = [
+            "open",
+            "--type",
+            "luks2",
+            "--key-file",
+            path(keyfile),
+            path(device),
+            name,
+        ];
+        run("cryptsetup", &args)?;
+        settle()
+    }
+
+    fn activate_volume_group(&self, name: &str) -> Result<(), String> {
+        run("vgchange", &["--activate", "y", name])?;
+        settle()
+    }
+
+    fn mount(
+        &self,
+        format: Format,
+        devices: &[PathBuf],
+        options: &[String],
+        target: &Path,
+    ) -> Result<(), String> {
+        let mut options = options.to_vec();
+        // Naming every device of a btrfs does not depend on udev having
+        // registered them with the kernel.
+        if devices.len() > 1 {
+            options.extend(devices.iter().map(|d| format!("device={}", path(d))));
+        }
+        let first = devices.first().ok_or("a filesystem has a device")?;
+        let format = format.to_string();
+        let options = options.join(",");
+        let mut args = vec!["-t", format.as_str()];
+        if !options.is_empty() {
+            args.extend(["-o", options.as_str()]);
+        }
+        args.extend([path(first), path(target)]);
+        run("mount", &args)
+    }
+
+    fn unmount(&self, target: &Path) -> Result<(), String> {
+        run("umount", &[path(target)])
+    }
+}
+
 impl Create for Host {
     fn create_table(&self, disk: &Path, table: Table) -> Result<(), String> {
         // sfdisk wipes nothing; apply has checked that the disk is empty.
@@ -179,20 +239,6 @@ impl Create for Host {
                 path(device),
             ],
         )?;
-        settle()
-    }
-
-    fn open_luks(&self, device: &Path, keyfile: &Path, name: &str) -> Result<(), String> {
-        let args = [
-            "open",
-            "--type",
-            "luks2",
-            "--key-file",
-            path(keyfile),
-            path(device),
-            name,
-        ];
-        run("cryptsetup", &args)?;
         settle()
     }
 
@@ -268,33 +314,6 @@ impl Create for Host {
         args.push(path(device));
         run("mkswap", &args)?;
         settle()
-    }
-
-    fn mount_btrfs(&self, devices: &[PathBuf]) -> Result<PathBuf, String> {
-        let parent = Path::new("/run/diskform");
-        let dir = parent.join(std::process::id().to_string());
-        fs::create_dir_all(parent)
-            .and_then(|()| fs::create_dir(&dir))
-            .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
-        // Naming every device does not depend on udev having registered
-        // them with the kernel.
-        let options = devices
-            .iter()
-            .map(|d| format!("device={}", path(d)))
-            .collect::<Vec<_>>()
-            .join(",");
-        let first = devices.first().ok_or("a btrfs has a device")?;
-        let args = ["-t", "btrfs", "-o", &options, path(first), path(&dir)];
-        if let Err(e) = run("mount", &args) {
-            let _ = fs::remove_dir(&dir);
-            return Err(e);
-        }
-        Ok(dir)
-    }
-
-    fn unmount(&self, dir: &Path) -> Result<(), String> {
-        run("umount", &[path(dir)])?;
-        fs::remove_dir(dir).map_err(|e| format!("cannot remove {}: {e}", dir.display()))
     }
 
     fn create_subvolume(&self, dir: &Path, subvolume: &str) -> Result<(), String> {

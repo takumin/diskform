@@ -453,7 +453,12 @@ pub fn unmount(
 
     // The devices that deactivating and closing remove.
     let mut removed: BTreeSet<PathBuf> = BTreeSet::new();
-    let groups = sys.volume_groups().map_err(fail)?;
+    // A declaration without LVM needs no LVM2 to unmount.
+    let groups = if decl.lvm.is_empty() {
+        Default::default()
+    } else {
+        sys.volume_groups().map_err(fail)?
+    };
     for name in decl.lvm.keys() {
         let Some(group) = groups.get(name.as_str()) else {
             continue;

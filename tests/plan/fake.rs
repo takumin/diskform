@@ -39,6 +39,10 @@ pub struct Fake {
     /// The number of devices of btrfs filesystems by UUID, if it differs
     /// from the number of devices that have its signature.
     pub btrfs_counts: BTreeMap<String, u64>,
+    /// The mounts, for mount and unmount; plan and destroy never read them.
+    pub mount_table: Option<Vec<MountEntry>>,
+    /// A machine without LVM2, where the volume groups cannot be read.
+    pub without_lvm2: bool,
 }
 
 pub const LINUX: &str = "0fc63daf-8483-4772-8e79-3d69d8477de4";
@@ -319,6 +323,9 @@ impl System for Fake {
     }
 
     fn volume_groups(&self) -> Result<BTreeMap<String, VolumeGroupState>, String> {
+        if self.without_lvm2 {
+            return Err("`vgs` was not found; LVM2 is needed to read volume groups".to_owned());
+        }
         Ok(self.volume_groups.clone())
     }
 
@@ -380,6 +387,8 @@ impl System for Fake {
     }
 
     fn mounts(&self) -> Result<Vec<MountEntry>, String> {
-        Err("plan and destroy do not read the mounts".to_owned())
+        self.mount_table
+            .clone()
+            .ok_or_else(|| "plan and destroy do not read the mounts".to_owned())
     }
 }
